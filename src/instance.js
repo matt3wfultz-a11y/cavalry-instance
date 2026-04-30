@@ -152,15 +152,29 @@ function createInstance(sourceId, offsetX, offsetY) {
   // Track this instance so Sync can find it later.
   tagAsInstance(instanceId, sourceId);
 
-  // Connect fill and stroke as compound attributes so toggling them on the
-  // source (on/off, colour, width) propagates live to instances.
-  // Fall back to a one-time copy if the compound attribute is not connectable.
-  let fillConnected = false;
-  let strokeConnected = false;
-  try { api.connect(sourceId, 'fill',   instanceId, 'fill');   fillConnected   = true; } catch (_) {}
-  try { api.connect(sourceId, 'stroke', instanceId, 'stroke'); strokeConnected = true; } catch (_) {}
-  if (!fillConnected)   api.setFill(instanceId,   api.hasFill(sourceId));
-  if (!strokeConnected) api.setStroke(instanceId, api.hasStroke(sourceId));
+  // Connect fill and stroke. Try the compound key first ('fill', 'stroke'),
+  // then fall back to common sub-attribute names seen across Cavalry versions.
+  // Log every attempt so mismatches are visible in the console.
+  function tryConnectAttr(attr) {
+    if (!api.hasAttribute(sourceId, attr)) return false;
+    try { api.connect(sourceId, attr, instanceId, attr); return true; }
+    catch (e) { console.log(`  connect "${attr}" failed: ${e.message}`); return false; }
+  }
+
+  const fillConnected =
+    tryConnectAttr('fill') ||
+    tryConnectAttr('fill.enable') ||
+    tryConnectAttr('fill.enabled') ||
+    tryConnectAttr('fillEnabled');
+  console.log(`  fill connected: ${fillConnected}`);
+  if (!fillConnected) api.setFill(instanceId, api.hasFill(sourceId));
+
+  const strokeConnected =
+    tryConnectAttr('stroke') ||
+    tryConnectAttr('stroke.enable') ||
+    tryConnectAttr('stroke.enabled') ||
+    tryConnectAttr('strokeEnabled');
+  console.log(`  stroke connected: ${strokeConnected}`);
 
   // Offset position (not connected — each instance moves independently).
   const srcPos = getPosition(sourceId);
@@ -211,6 +225,28 @@ function detachInstance(instanceId) {
   console.log(`Detached "${name}" — ${detached} connections removed.`);
 }
 
+// ─── Debug helper ────────────────────────────────────────────────────────────
+// Logs the layer type, every attribute key, and fill/stroke/text flags.
+// Run this on the source layer before reporting issues — the output tells us
+// the exact attribute names Cavalry uses for this layer type.
+
+function debugLayer(layerId) {
+  const name = api.getNiceName(layerId) || layerId;
+  const type = api.getLayerType(layerId);
+  const attrs = api.getAttributes(layerId);
+
+  console.log(`\n=== Debug: "${name}" ===`);
+  console.log(`  type          : ${type}`);
+  console.log(`  hasFill       : ${api.hasFill(layerId)}`);
+  console.log(`  hasStroke     : ${api.hasStroke(layerId)}`);
+  console.log(`  has 'text'    : ${api.hasAttribute(layerId, 'text')}`);
+  console.log(`  has 'fill'    : ${api.hasAttribute(layerId, 'fill')}`);
+  console.log(`  has 'stroke'  : ${api.hasAttribute(layerId, 'stroke')}`);
+  console.log(`  attributes (${attrs.length}):`);
+  for (const a of attrs) console.log(`    ${a}`);
+  console.log('=== end debug ===\n');
+}
+
 // ─── UI ──────────────────────────────────────────────────────────────────────
 
 const hintLabel = new ui.Label('Select a source layer, then click Create.');
@@ -256,6 +292,16 @@ detachBtn.onClick = function () {
   detachInstance(selected[0]);
 };
 
+const debugBtn = new ui.Button('Debug Selected Layer');
+debugBtn.onClick = function () {
+  const selected = api.getSelection();
+  if (!selected || selected.length === 0) {
+    console.log('WARNING: select a layer to debug.');
+    return;
+  }
+  debugLayer(selected[0]);
+};
+
 const offsetRow = new ui.HLayout();
 offsetRow.setSpaceBetween(6);
 offsetRow.add(
@@ -266,7 +312,7 @@ offsetRow.add(
 const root = new ui.VLayout();
 root.setMargins(10, 10, 10, 10);
 root.setSpaceBetween(8);
-root.add(hintLabel, offsetRow, createBtn, syncBtn, detachBtn);
+root.add(hintLabel, offsetRow, createBtn, syncBtn, detachBtn, debugBtn);
 
 ui.setTitle('Cavalry Instance');
 ui.setMinimumWidth(260);
