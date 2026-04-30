@@ -22,7 +22,7 @@
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const CONFIG = {
-  instanceCount: 3,  // Number of instances to create
+  instanceCount: 1,  // Number of instances to create
   offsetX: 150,      // Horizontal gap between each instance (scene units)
   offsetY: 0,        // Vertical gap between each instance (scene units)
   namePrefix: '',    // Instance name prefix — defaults to the source layer name
@@ -37,10 +37,6 @@ const TRANSFORM_ROOTS = new Set([
   'position',
   'rotation',
   'scale',
-  'anchor',
-  'shear',
-  // Remove 'opacity' from this set to share opacity across all instances instead.
-  'opacity',
 ]);
 
 function isTransformAttr(key) {
@@ -79,6 +75,11 @@ function createInstance(sourceId, index) {
   const instanceName = `${prefix} Instance ${index}`;
 
   const instanceId = api.create(api.getLayerType(sourceId), instanceName);
+
+  // Mirror fill/stroke enabled state — a fresh layer may have these off by
+  // default, which would hide the connected colour/width values.
+  api.setFill(instanceId, api.hasFill(sourceId));
+  api.setStroke(instanceId, api.hasStroke(sourceId));
 
   // Offset position — this is NOT connected, so each instance moves freely.
   const srcPos = getPosition(sourceId);
