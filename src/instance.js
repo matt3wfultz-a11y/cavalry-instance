@@ -47,8 +47,28 @@ function setPosition(layerId, x, y) {
 function createInstance(sourceId, offsetX, offsetY) {
   const sourceName = api.getNiceName(sourceId) || sourceId;
   const instanceName = `${sourceName} Instance`;
+  const layerType = api.getLayerType(sourceId);
 
-  const instanceId = api.create(api.getLayerType(sourceId), instanceName);
+  let instanceId;
+
+  if (layerType === 'editableShape') {
+    // For editable shapes, initialise the instance from the source path so it
+    // starts as the correct shape before the attribute connections take over.
+    const rawPath = api.getEditablePath(sourceId, false);
+    const path = new cavalry.Path();
+    path.fromObject(rawPath);
+    instanceId = api.createEditable(path, instanceName);
+  } else {
+    instanceId = api.create(layerType, instanceName);
+    // Match the source's generator type (rectangle, circle, star, etc.) so
+    // the instance doesn't default to a generic polygon.
+    const gens = api.getGenerators(sourceId);
+    for (const g of gens) {
+      try {
+        api.setGenerator(instanceId, g, api.getCurrentGeneratorType(sourceId, g));
+      } catch (_) {}
+    }
+  }
 
   // Mirror fill/stroke enabled state — a blank layer from api.create() may
   // have these off, which would hide the connected colour/width values.
