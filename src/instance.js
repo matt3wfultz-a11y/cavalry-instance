@@ -1,43 +1,20 @@
-// Cavalry Instance Script
+// Cavalry Instance
 //
 // Creates Cinema 4D-style instances of a selected layer.
-// Instances share the source's path, shape geometry, and appearance attributes —
-// so editing the source updates every instance automatically. Each instance keeps
-// its own independent transform (position, rotation, scale).
+// Instances share the source's path, shape geometry, fill, stroke, and all
+// other visual attributes. Position, rotation, and scale stay independent.
 //
-// How to use:
-//   1. Select the layer you want to instance in the Cavalry scene
-//   2. Adjust CONFIG below if needed
-//   3. Paste or load this script in the Cavalry JavaScript Editor and run it
-//   4. Edit the original source layer to update all instances at once
-//   5. Move / rotate / scale each instance independently in the viewport
-//
-// To detach a single instance (make it fully independent), select it and call:
-//   detachInstance(api.getSelection()[0]);
-//
-// Cavalry API reference used:
-//   api.getSelection(), api.getNiceName(), api.rename(), api.duplicate()
-//   api.getAttributes(), api.get(), api.set(), api.connect(), api.disconnectInput()
-
-// ─── Config ───────────────────────────────────────────────────────────────────
-
-const CONFIG = {
-  instanceCount: 1,  // Number of instances to create
-  offsetX: 150,      // Horizontal gap between each instance (scene units)
-  offsetY: 0,        // Vertical gap between each instance (scene units)
-  namePrefix: '',    // Instance name prefix — defaults to the source layer name
-};
+// Usage:
+//   1. Open this script as a panel in Cavalry (Scripting > New Script Panel)
+//   2. Select a source layer in your scene
+//   3. Set an offset so the instance doesn't land on top of the source
+//   4. Click Create Instance
+//   5. Edit the source layer — all instances update automatically
+//   6. To break one instance free, select it and click Detach
 
 // ─── Transform attribute filter ───────────────────────────────────────────────
-// Attributes whose root key (the part before the first ".") matches one of these
-// are treated as transform properties and left independent per instance.
-// Everything else — path data, shape params, fill, stroke, etc. — is connected.
 
-const TRANSFORM_ROOTS = new Set([
-  'position',
-  'rotation',
-  'scale',
-]);
+const TRANSFORM_ROOTS = new Set(['position', 'rotation', 'scale']);
 
 function isTransformAttr(key) {
   const root = key.split('.')[0].toLowerCase();
@@ -67,90 +44,106 @@ function setPosition(layerId, x, y) {
 
 // ─── Core ─────────────────────────────────────────────────────────────────────
 
-// Create one instance of sourceId at offset index * CONFIG.offset{X,Y}.
-// Returns the new layer ID.
-function createInstance(sourceId, index) {
+function createInstance(sourceId, offsetX, offsetY) {
   const sourceName = api.getNiceName(sourceId) || sourceId;
-  const prefix = CONFIG.namePrefix || sourceName;
-  const instanceName = `${prefix} Instance ${index}`;
+  const instanceName = `${sourceName} Instance`;
 
   const instanceId = api.create(api.getLayerType(sourceId), instanceName);
 
-  // Mirror fill/stroke enabled state — a fresh layer may have these off by
-  // default, which would hide the connected colour/width values.
+  // Mirror fill/stroke enabled state — a blank layer from api.create() may
+  // have these off, which would hide the connected colour/width values.
   api.setFill(instanceId, api.hasFill(sourceId));
   api.setStroke(instanceId, api.hasStroke(sourceId));
 
-  // Offset position — this is NOT connected, so each instance moves freely.
+  // Offset position (not connected, so the instance moves independently).
   const srcPos = getPosition(sourceId);
-  setPosition(
-    instanceId,
-    srcPos.x + CONFIG.offsetX * index,
-    srcPos.y + CONFIG.offsetY * index,
-  );
+  setPosition(instanceId, srcPos.x + offsetX, srcPos.y + offsetY);
 
-  // Connect every non-transform attribute so the instance mirrors the source.
-  // This covers: path/pathData, shape geometry (width, height, radius, corners),
-  // fill color, stroke color + width, blend mode, and any other visual attrs.
+  // Connect every non-transform attribute: path, shape geometry, fill colour,
+  // stroke colour + width, opacity, blend mode, anchor, etc.
   const keys = api.getAttributes(sourceId);
   let connected = 0;
-
   for (const key of keys) {
     if (isTransformAttr(key)) continue;
     try {
       api.connect(sourceId, key, instanceId, key);
       connected++;
     } catch (_) {
-      // Read-only or computed attribute — not connectable, skip silently.
+      // Read-only or computed — not connectable, skip silently.
     }
   }
 
-  console.log(`  [${index}] "${instanceName}" — ${connected} attrs connected`);
+  console.log(`Instance "${instanceName}" created — ${connected} attrs connected.`);
   return instanceId;
 }
 
-// Break all non-transform connections on an instance, making it fully independent.
-// Useful when you want to diverge one copy from the source.
+// Break all non-transform attribute connections, making the instance fully
+// independent from the source.
 function detachInstance(instanceId) {
   const keys = api.getAttributes(instanceId);
   let detached = 0;
-
   for (const key of keys) {
     if (isTransformAttr(key)) continue;
     try {
       api.disconnectInput(instanceId, key);
       detached++;
-    } catch (_) {
-      // Not connected or not disconnectable — skip.
-    }
+    } catch (_) {}
   }
-
   const name = api.getNiceName(instanceId) || instanceId;
-  console.log(`Detached "${name}" (${detached} connections removed).`);
+  console.log(`Detached "${name}" — ${detached} connections removed.`);
 }
 
-// ─── Entry point ──────────────────────────────────────────────────────────────
+// ─── UI ──────────────────────────────────────────────────────────────────────
 
-function main() {
+const hintLabel = new ui.Label('Select a source layer, then click Create.');
+hintLabel.setFontSize(11);
+
+// Offset fields
+const offsetXField = new ui.NumericField(150);
+offsetXField.setType(0);
+offsetXField.setMin(-9999);
+offsetXField.setMax(9999);
+
+const offsetYField = new ui.NumericField(0);
+offsetYField.setType(0);
+offsetYField.setMin(-9999);
+offsetYField.setMax(9999);
+
+const createBtn = new ui.Button('Create Instance');
+createBtn.onClick = function () {
   const selected = api.getSelection();
-
   if (!selected || selected.length === 0) {
-    console.log('WARNING: select a source layer first, then run this script.');
+    console.log('WARNING: select a source layer before creating an instance.');
     return;
   }
+  createInstance(selected[0], offsetXField.getValue(), offsetYField.getValue());
+};
 
-  const sourceId = selected[0];
-  const sourceName = api.getNiceName(sourceId) || sourceId;
-
-  console.log(`Cavalry Instance: creating ${CONFIG.instanceCount} instance(s) of "${sourceName}"...`);
-
-  const ids = [];
-  for (let i = 1; i <= CONFIG.instanceCount; i++) {
-    ids.push(createInstance(sourceId, i));
+const detachBtn = new ui.Button('Detach Selected Instance');
+detachBtn.onClick = function () {
+  const selected = api.getSelection();
+  if (!selected || selected.length === 0) {
+    console.log('WARNING: select an instance layer to detach.');
+    return;
   }
+  detachInstance(selected[0]);
+};
 
-  console.log(`Done — ${ids.length} instance(s) ready.`);
-  console.log(`Edit "${sourceName}" to update path, shape, and appearance on all instances.`);
-}
+// Offset row: [Label "Offset X"] [field] [Label "Y"] [field]
+const offsetRow = new ui.HLayout();
+offsetRow.setSpaceBetween(6);
+offsetRow.add(
+  new ui.Label('Offset X'), offsetXField,
+  new ui.Label('Y'), offsetYField,
+);
 
-main();
+// Root layout
+const root = new ui.VLayout();
+root.setMargins(10, 10, 10, 10);
+root.setSpaceBetween(8);
+root.add(hintLabel, offsetRow, createBtn, detachBtn);
+
+ui.setTitle('Cavalry Instance');
+ui.setMinimumWidth(260);
+ui.add(root);
+ui.show();
