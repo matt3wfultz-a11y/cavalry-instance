@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "typeRoots": ["node_modules/cavalry-types"]
+  },
+  "include": ["src/**/*.js"]
+}

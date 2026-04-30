@@ -1,0 +1,8 @@
+{
+  "name": "cavalry-instance",
+  "version": "1.0.0",
+  "description": "Cinema 4D-style instance layer for Cavalry — linked copies that share path, shape, and appearance but move independently",
+  "devDependencies": {
+    "cavalry-types": "latest"
+  }
+}
