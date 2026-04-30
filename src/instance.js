@@ -78,8 +78,7 @@ function createInstance(sourceId, index) {
   const prefix = CONFIG.namePrefix || sourceName;
   const instanceName = `${prefix} Instance ${index}`;
 
-  const instanceId = api.duplicate(sourceId, false);
-  api.rename(instanceId, instanceName);
+  const instanceId = api.create(api.getLayerType(sourceId), instanceName);
 
   // Offset position — this is NOT connected, so each instance moves freely.
   const srcPos = getPosition(sourceId);
