@@ -14,6 +14,10 @@
 //
 // To detach a single instance (make it fully independent), select it and call:
 //   detachInstance(api.getSelection()[0]);
+//
+// Cavalry API reference used:
+//   api.getSelection(), api.getNiceName(), api.rename(), api.duplicate()
+//   api.getAttributes(), api.get(), api.set(), api.connect(), api.disconnectInput()
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -61,7 +65,7 @@ function setPosition(layerId, x, y) {
   try {
     api.set(layerId, { 'position.x': x, 'position.y': y });
   } catch (e) {
-    api.log(`WARNING: could not set position — ${e.message}`);
+    console.log(`WARNING: could not set position — ${e.message}`);
   }
 }
 
@@ -70,12 +74,12 @@ function setPosition(layerId, x, y) {
 // Create one instance of sourceId at offset index * CONFIG.offset{X,Y}.
 // Returns the new layer ID.
 function createInstance(sourceId, index) {
-  const sourceName = api.get(sourceId, 'name') || sourceId;
+  const sourceName = api.getNiceName(sourceId) || sourceId;
   const prefix = CONFIG.namePrefix || sourceName;
   const instanceName = `${prefix} Instance ${index}`;
 
   const instanceId = api.duplicate(sourceId);
-  api.set(instanceId, { name: instanceName });
+  api.rename(instanceId, instanceName);
 
   // Offset position — this is NOT connected, so each instance moves freely.
   const srcPos = getPosition(sourceId);
@@ -101,7 +105,7 @@ function createInstance(sourceId, index) {
     }
   }
 
-  api.log(`  [${index}] "${instanceName}" — ${connected} attrs connected`);
+  console.log(`  [${index}] "${instanceName}" — ${connected} attrs connected`);
   return instanceId;
 }
 
@@ -121,8 +125,8 @@ function detachInstance(instanceId) {
     }
   }
 
-  const name = api.get(instanceId, 'name') || instanceId;
-  api.log(`Detached "${name}" (${detached} connections removed).`);
+  const name = api.getNiceName(instanceId) || instanceId;
+  console.log(`Detached "${name}" (${detached} connections removed).`);
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
@@ -131,22 +135,22 @@ function main() {
   const selected = api.getSelection();
 
   if (!selected || selected.length === 0) {
-    api.log('WARNING: select a source layer first, then run this script.');
+    console.log('WARNING: select a source layer first, then run this script.');
     return;
   }
 
   const sourceId = selected[0];
-  const sourceName = api.get(sourceId, 'name') || sourceId;
+  const sourceName = api.getNiceName(sourceId) || sourceId;
 
-  api.log(`Cavalry Instance: creating ${CONFIG.instanceCount} instance(s) of "${sourceName}"...`);
+  console.log(`Cavalry Instance: creating ${CONFIG.instanceCount} instance(s) of "${sourceName}"...`);
 
   const ids = [];
   for (let i = 1; i <= CONFIG.instanceCount; i++) {
     ids.push(createInstance(sourceId, i));
   }
 
-  api.log(`Done — ${ids.length} instance(s) ready.`);
-  api.log(`Edit "${sourceName}" to update path, shape, and appearance on all instances.`);
+  console.log(`Done — ${ids.length} instance(s) ready.`);
+  console.log(`Edit "${sourceName}" to update path, shape, and appearance on all instances.`);
 }
 
 main();
