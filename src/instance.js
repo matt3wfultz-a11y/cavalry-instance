@@ -13,7 +13,7 @@
 //   5. Move / rotate / scale each instance independently in the viewport
 //
 // To detach a single instance (make it fully independent), select it and call:
-//   detachInstance(api.getSelectedLayerIds()[0]);
+//   detachInstance(api.getSelection()[0]);
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -25,24 +25,23 @@ const CONFIG = {
 };
 
 // ─── Transform attribute filter ───────────────────────────────────────────────
-// Any attribute whose key contains one of these fragments (case-insensitive,
-// split on "." or "/") is treated as a transform property and left independent
-// per instance. Everything else — path data, shape params, fill, stroke, etc. —
-// is connected from source → instance.
+// Attributes whose root key (the part before the first ".") matches one of these
+// are treated as transform properties and left independent per instance.
+// Everything else — path data, shape params, fill, stroke, etc. — is connected.
 
-const TRANSFORM_FRAGMENTS = new Set([
-  'transform',
-  'position', 'x', 'y', 'z',
+const TRANSFORM_ROOTS = new Set([
+  'position',
   'rotation',
-  'scale', 'scalex', 'scaley', 'scalez',
-  'anchor', 'anchorx', 'anchory',
+  'scale',
+  'anchor',
   'shear',
-  // 'opacity' is intentionally excluded from this set so that opacity is
-  // connected (shared) by default. Add it back here to make opacity independent.
+  // Remove 'opacity' from this set to share opacity across all instances instead.
+  'opacity',
 ]);
 
 function isTransformAttr(key) {
-  return key.toLowerCase().split(/[./]/).some(part => TRANSFORM_FRAGMENTS.has(part));
+  const root = key.split('.')[0].toLowerCase();
+  return TRANSFORM_ROOTS.has(root);
 }
 
 // ─── Position helpers ─────────────────────────────────────────────────────────
@@ -50,8 +49,8 @@ function isTransformAttr(key) {
 function getPosition(layerId) {
   try {
     return {
-      x: api.getLayerAttribute(layerId, 'transform.position.x') ?? 0,
-      y: api.getLayerAttribute(layerId, 'transform.position.y') ?? 0,
+      x: api.get(layerId, 'position.x') ?? 0,
+      y: api.get(layerId, 'position.y') ?? 0,
     };
   } catch (_) {
     return { x: 0, y: 0 };
@@ -60,10 +59,9 @@ function getPosition(layerId) {
 
 function setPosition(layerId, x, y) {
   try {
-    api.setLayerAttribute(layerId, 'transform.position.x', x);
-    api.setLayerAttribute(layerId, 'transform.position.y', y);
+    api.set(layerId, { 'position.x': x, 'position.y': y });
   } catch (e) {
-    api.warning(`Instance: could not set position — ${e.message}`);
+    api.log(`WARNING: could not set position — ${e.message}`);
   }
 }
 
@@ -72,11 +70,12 @@ function setPosition(layerId, x, y) {
 // Create one instance of sourceId at offset index * CONFIG.offset{X,Y}.
 // Returns the new layer ID.
 function createInstance(sourceId, index) {
-  const sourceName = api.getLayerName(sourceId);
+  const sourceName = api.get(sourceId, 'name') || sourceId;
   const prefix = CONFIG.namePrefix || sourceName;
+  const instanceName = `${prefix} Instance ${index}`;
 
   const instanceId = api.duplicate(sourceId);
-  api.setLayerName(instanceId, `${prefix} Instance ${index}`);
+  api.set(instanceId, { name: instanceName });
 
   // Offset position — this is NOT connected, so each instance moves freely.
   const srcPos = getPosition(sourceId);
@@ -89,7 +88,7 @@ function createInstance(sourceId, index) {
   // Connect every non-transform attribute so the instance mirrors the source.
   // This covers: path/pathData, shape geometry (width, height, radius, corners),
   // fill color, stroke color + width, blend mode, and any other visual attrs.
-  const keys = api.getLayerAttributeKeys(sourceId);
+  const keys = api.getAttributes(sourceId);
   let connected = 0;
 
   for (const key of keys) {
@@ -102,41 +101,42 @@ function createInstance(sourceId, index) {
     }
   }
 
-  api.log(`  [${index}] "${api.getLayerName(instanceId)}" — ${connected} attrs connected`);
+  api.log(`  [${index}] "${instanceName}" — ${connected} attrs connected`);
   return instanceId;
 }
 
 // Break all non-transform connections on an instance, making it fully independent.
 // Useful when you want to diverge one copy from the source.
 function detachInstance(instanceId) {
-  const keys = api.getLayerAttributeKeys(instanceId);
+  const keys = api.getAttributes(instanceId);
   let detached = 0;
 
   for (const key of keys) {
     if (isTransformAttr(key)) continue;
     try {
-      api.disconnect(instanceId, key);
+      api.disconnectInput(instanceId, key);
       detached++;
     } catch (_) {
       // Not connected or not disconnectable — skip.
     }
   }
 
-  api.log(`Detached "${api.getLayerName(instanceId)}" (${detached} connections removed).`);
+  const name = api.get(instanceId, 'name') || instanceId;
+  api.log(`Detached "${name}" (${detached} connections removed).`);
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 function main() {
-  const selected = api.getSelectedLayerIds();
+  const selected = api.getSelection();
 
   if (!selected || selected.length === 0) {
-    api.warning('Cavalry Instance: select a source layer first, then run this script.');
+    api.log('WARNING: select a source layer first, then run this script.');
     return;
   }
 
   const sourceId = selected[0];
-  const sourceName = api.getLayerName(sourceId);
+  const sourceName = api.get(sourceId, 'name') || sourceId;
 
   api.log(`Cavalry Instance: creating ${CONFIG.instanceCount} instance(s) of "${sourceName}"...`);
 
@@ -146,7 +146,7 @@ function main() {
   }
 
   api.log(`Done — ${ids.length} instance(s) ready.`);
-  api.log(`Tip: edit "${sourceName}" to update path, shape, and appearance on all instances.`);
+  api.log(`Edit "${sourceName}" to update path, shape, and appearance on all instances.`);
 }
 
 main();
