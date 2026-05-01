@@ -81,11 +81,29 @@ function syncFillStroke() {
       const newFill   = api.hasFill(sourceId);
       const newStroke = api.hasStroke(sourceId);
       if (newFill === state.fill && newStroke === state.stroke) continue;
+
+      const strokeJustEnabled = newStroke && !state.stroke;
+      const fillJustEnabled   = newFill   && !state.fill;
       state.fill   = newFill;
       state.stroke = newStroke;
+
       for (const id of getInstancesOfSource(sourceId)) {
         api.setFill(id,   newFill);
         api.setStroke(id, newStroke);
+        // Wire sub-attributes the first time fill/stroke is switched on,
+        // since they aren't exposed in getAttributes() while disabled.
+        if (strokeJustEnabled) {
+          for (const key of api.getAttributes(sourceId)) {
+            if (key.split('.')[0].toLowerCase() !== 'stroke') continue;
+            try { api.connect(sourceId, key, id, key); } catch (_) {}
+          }
+        }
+        if (fillJustEnabled) {
+          for (const key of api.getAttributes(sourceId)) {
+            if (key.split('.')[0].toLowerCase() !== 'fill') continue;
+            try { api.connect(sourceId, key, id, key); } catch (_) {}
+          }
+        }
       }
     } catch (_) {}
   }
