@@ -1,22 +1,17 @@
 // Shape Size Tie
 //
-// Ties layers to a master shape so their positions track proportionally
-// as the shape's width and height change. Only positions are updated —
-// follower scales are never touched, so text stays crisp.
-//
-// When the master grows wider, followers move outward horizontally by the
-// same ratio. When it gets taller, they move vertically. Moving the master
-// drags all followers with it.
+// Ties layers to a master shape so they reposition AND scale proportionally
+// as the shape's width and height change. Followers scale uniformly (no
+// distortion) using the smaller of the two axis ratios so they always fit.
 //
 // Usage:
 //   1. Select the master shape and click "Set Selected as Master"
 //   2. Select the layers to tie and click "Tie to Master"
-//   3. Resize the master (width/height) — followers reposition proportionally
+//   3. Resize the master (width/height) — followers reposition and scale
 //   4. To free a layer, select it and click "Untie Selected"
 //   5. "Clear All" removes the master and all ties
 
 // ─── Size attribute detection ─────────────────────────────────────────────────
-// Different shape types expose different attribute names for their dimensions.
 
 function hasAttr(layerId, attr) {
   try { return api.hasAttribute(layerId, attr); } catch (_) { return false; }
@@ -33,7 +28,6 @@ function detectSizeAttrs(layerId) {
   for (const { w, h } of pairs) {
     if (hasAttr(layerId, w) && hasAttr(layerId, h)) return { wAttr: w, hAttr: h };
   }
-  // Single-axis shapes (circles, regular polygons)
   for (const attr of ['radius', 'xRadius', 'size']) {
     if (hasAttr(layerId, attr)) return { wAttr: attr, hAttr: attr };
   }
@@ -55,14 +49,15 @@ function logAttrs(layerId) {
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let masterId = null;
-let masterSizeAttrs = null; // { wAttr, hAttr }
+let masterSizeAttrs = null;
 
-// Last observed master state — bail-out guard to prevent cascade loops
 let lastMaster = { w: 0, h: 0, posX: 0, posY: 0 };
 
-// { followerId: { offsetX, offsetY, baseMasterW, baseMasterH } }
-//   offsetX/Y     = follower_pos - master_pos at tie-time (world space)
-//   baseMasterW/H = master size at tie-time (reference for computing change ratio)
+// Re-entrancy guard: our api.set() calls on followers trigger onAttrChanged
+// again; this flag prevents that secondary fire from doing any work.
+let updating = false;
+
+// { followerId: { offsetX, offsetY, baseScaleX, baseScaleY, baseMasterW, baseMasterH } }
 const followers = {};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -85,6 +80,15 @@ function getPosition(layerId) {
       y: api.get(layerId, 'position.y') ?? 0,
     };
   } catch (_) { return { x: 0, y: 0 }; }
+}
+
+function getScale(layerId) {
+  try {
+    return {
+      x: api.get(layerId, 'scale.x') ?? 1,
+      y: api.get(layerId, 'scale.y') ?? 1,
+    };
+  } catch (_) { return { x: 1, y: 1 }; }
 }
 
 function layerName(id) {
@@ -141,15 +145,19 @@ function tieSelected() {
   for (const id of sel) {
     if (id === masterId) continue;
     const fp = getPosition(id);
+    const fs = getScale(id);
     followers[id] = {
       offsetX: fp.x - mp.x,
       offsetY: fp.y - mp.y,
+      baseScaleX: fs.x,
+      baseScaleY: fs.y,
       baseMasterW: sz.w,
       baseMasterH: sz.h,
     };
     console.log(
       `Tied "${layerName(id)}" ` +
-      `(offset ${followers[id].offsetX.toFixed(1)}, ${followers[id].offsetY.toFixed(1)})`
+      `(offset ${followers[id].offsetX.toFixed(1)}, ${followers[id].offsetY.toFixed(1)} | ` +
+      `scale ${fs.x}, ${fs.y})`
     );
     count++;
   }
@@ -185,11 +193,9 @@ function clearAll() {
 }
 
 // ─── Reactive update ──────────────────────────────────────────────────────────
-// onAttrChanged fires for every attribute edit in the comp.
-// Bail early if neither size nor position has changed on the master,
-// which prevents follower position writes from feeding back into this handler.
 
 function onAttrChanged() {
+  if (updating) return;
   if (!masterId || !masterSizeAttrs || !Object.keys(followers).length) return;
 
   const sz = getMasterSize();
@@ -203,15 +209,24 @@ function onAttrChanged() {
 
   lastMaster = { w: sz.w, h: sz.h, posX: mp.x, posY: mp.y };
 
-  for (const [id, { offsetX, offsetY, baseMasterW, baseMasterH }] of Object.entries(followers)) {
-    const sfx = baseMasterW !== 0 ? sz.w / baseMasterW : 1;
-    const sfy = baseMasterH !== 0 ? sz.h / baseMasterH : 1;
-    try {
-      api.set(id, {
-        'position.x': mp.x + offsetX * sfx,
-        'position.y': mp.y + offsetY * sfy,
-      });
-    } catch (_) {}
+  updating = true;
+  try {
+    for (const [id, { offsetX, offsetY, baseScaleX, baseScaleY, baseMasterW, baseMasterH }] of Object.entries(followers)) {
+      const sfx = baseMasterW !== 0 ? sz.w / baseMasterW : 1;
+      const sfy = baseMasterH !== 0 ? sz.h / baseMasterH : 1;
+      // Uniform scale — use the smaller axis so followers always fit inside
+      const sf = Math.min(sfx, sfy);
+      try {
+        api.set(id, {
+          'position.x': mp.x + offsetX * sfx,
+          'position.y': mp.y + offsetY * sfy,
+          'scale.x':    baseScaleX * sf,
+          'scale.y':    baseScaleY * sf,
+        });
+      } catch (_) {}
+    }
+  } finally {
+    updating = false;
   }
 }
 
