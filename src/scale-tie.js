@@ -20,8 +20,10 @@
 
 function detectSizeAttrs(layerId) {
   const pairs = [
-    { w: 'width', h: 'height' },
-    { w: 'size.x', h: 'size.y' },
+    { w: 'width',    h: 'height'   },
+    { w: 'size.x',  h: 'size.y'   },
+    { w: 'xRadius', h: 'yRadius'  },
+    { w: 'scaleX',  h: 'scaleY'   },
   ];
   for (const { w, h } of pairs) {
     try {
@@ -30,11 +32,25 @@ function detectSizeAttrs(layerId) {
       if (wv != null && hv != null) return { wAttr: w, hAttr: h };
     } catch (_) {}
   }
-  // Circles expose a single radius; treat it as both axes
-  try {
-    if (api.get(layerId, 'radius') != null) return { wAttr: 'radius', hAttr: 'radius' };
-  } catch (_) {}
+  // Single-axis shapes (circles, regular polygons)
+  for (const attr of ['radius', 'xRadius', 'size']) {
+    try {
+      if (api.get(layerId, attr) != null) return { wAttr: attr, hAttr: attr };
+    } catch (_) {}
+  }
   return null;
+}
+
+function logAttrs(layerId) {
+  const name = layerName(layerId);
+  const type = api.getLayerType(layerId);
+  const attrs = api.getAttributes(layerId);
+  console.log(`\n=== "${name}" (${type}) — ${attrs.length} attrs ===`);
+  for (const a of attrs) {
+    try { console.log(`  ${a}: ${JSON.stringify(api.get(layerId, a))}`); }
+    catch (_) { console.log(`  ${a}: (unreadable)`); }
+  }
+  console.log('===\n');
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -219,10 +235,17 @@ untieBtn.onClick = untieSelected;
 const clearBtn = new ui.Button('Clear All');
 clearBtn.onClick = clearAll;
 
+const debugBtn = new ui.Button('Log Attrs of Selected');
+debugBtn.onClick = function () {
+  const sel = api.getSelection();
+  if (!sel || !sel.length) { console.log('WARNING: select a layer to inspect.'); return; }
+  logAttrs(sel[0]);
+};
+
 const root = new ui.VLayout();
 root.setMargins(10, 10, 10, 10);
 root.setSpaceBetween(8);
-root.add(masterLabel, tiedLabel, setMasterBtn, tieBtn, untieBtn, clearBtn);
+root.add(masterLabel, tiedLabel, setMasterBtn, tieBtn, untieBtn, clearBtn, debugBtn);
 
 ui.addCallbackObject({ onAttrChanged });
 
