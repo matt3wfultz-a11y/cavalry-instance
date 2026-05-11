@@ -1,42 +1,65 @@
-// Shape Scale Tie
+// Shape Size Tie
 //
-// Ties layers to a master shape so they scale and reposition proportionally.
-// When the master scales, tied layers scale by the same factor AND their
-// distances from the master's center scale too — so objects evenly distributed
-// inside a shape stay in the same relative positions as the shape grows or shrinks.
+// Ties layers to a master shape so their positions track proportionally
+// as the shape's width and height change. Only positions are updated —
+// follower scales are never touched, so text stays crisp.
+//
+// When the master grows wider, followers move outward horizontally by the
+// same ratio. When it gets taller, they move vertically. Moving the master
+// drags all followers with it.
 //
 // Usage:
 //   1. Select the master shape and click "Set Selected as Master"
-//   2. Select the layers you want to follow it and click "Tie to Master"
-//   3. Change the master's scale — tied layers scale and reposition proportionally
-//   4. Moving the master also moves all tied layers with it
-//   5. To free a layer, select it and click "Untie Selected"
-//   6. "Clear All" removes the master and all ties
+//   2. Select the layers to tie and click "Tie to Master"
+//   3. Resize the master (width/height) — followers reposition proportionally
+//   4. To free a layer, select it and click "Untie Selected"
+//   5. "Clear All" removes the master and all ties
+
+// ─── Size attribute detection ─────────────────────────────────────────────────
+// Different shape types expose different attribute names for their dimensions.
+
+function detectSizeAttrs(layerId) {
+  const pairs = [
+    { w: 'width', h: 'height' },
+    { w: 'size.x', h: 'size.y' },
+  ];
+  for (const { w, h } of pairs) {
+    try {
+      const wv = api.get(layerId, w);
+      const hv = api.get(layerId, h);
+      if (wv != null && hv != null) return { wAttr: w, hAttr: h };
+    } catch (_) {}
+  }
+  // Circles expose a single radius; treat it as both axes
+  try {
+    if (api.get(layerId, 'radius') != null) return { wAttr: 'radius', hAttr: 'radius' };
+  } catch (_) {}
+  return null;
+}
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let masterId = null;
-
-// { followerId: { ratioX, ratioY, offsetX, offsetY, baseMasterScaleX, baseMasterScaleY } }
-//   ratioX/Y          = follower_scale / master_scale at tie-time
-//   offsetX/Y         = follower_pos - master_pos at tie-time (world space)
-//   baseMasterScale   = master scale at tie-time (used to compute scale-change factor)
-const followers = {};
+let masterSizeAttrs = null; // { wAttr, hAttr }
 
 // Last observed master state — bail-out guard to prevent cascade loops
-let lastMaster = { scaleX: 1, scaleY: 1, posX: 0, posY: 0 };
+let lastMaster = { w: 0, h: 0, posX: 0, posY: 0 };
+
+// { followerId: { offsetX, offsetY, baseMasterW, baseMasterH } }
+//   offsetX/Y     = follower_pos - master_pos at tie-time (world space)
+//   baseMasterW/H = master size at tie-time (reference for computing change ratio)
+const followers = {};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getScale(layerId) {
+function getMasterSize() {
+  if (!masterSizeAttrs) return null;
   try {
     return {
-      x: api.get(layerId, 'scale.x') ?? 1,
-      y: api.get(layerId, 'scale.y') ?? 1,
+      w: api.get(masterId, masterSizeAttrs.wAttr) ?? 0,
+      h: api.get(masterId, masterSizeAttrs.hAttr) ?? 0,
     };
-  } catch (_) {
-    return { x: 1, y: 1 };
-  }
+  } catch (_) { return null; }
 }
 
 function getPosition(layerId) {
@@ -45,9 +68,7 @@ function getPosition(layerId) {
       x: api.get(layerId, 'position.x') ?? 0,
       y: api.get(layerId, 'position.y') ?? 0,
     };
-  } catch (_) {
-    return { x: 0, y: 0 };
-  }
+  } catch (_) { return { x: 0, y: 0 }; }
 }
 
 function layerName(id) {
@@ -56,7 +77,8 @@ function layerName(id) {
 
 function refreshLabels() {
   const name = masterId ? layerName(masterId) : '(none)';
-  masterLabel.setText(`Master: ${name}`);
+  const sizeInfo = masterSizeAttrs ? ` [${masterSizeAttrs.wAttr} / ${masterSizeAttrs.hAttr}]` : '';
+  masterLabel.setText(`Master: ${name}${sizeInfo}`);
   tiedLabel.setText(`Tied: ${Object.keys(followers).length} layer(s)`);
 }
 
@@ -69,10 +91,20 @@ function setMaster() {
     return;
   }
   masterId = sel[0];
-  const ms = getScale(masterId);
+  masterSizeAttrs = detectSizeAttrs(masterId);
+  if (!masterSizeAttrs) {
+    console.log(`WARNING: "${layerName(masterId)}" has no detectable width/height attributes.`);
+    masterId = null;
+    return;
+  }
+  const sz = getMasterSize();
   const mp = getPosition(masterId);
-  lastMaster = { scaleX: ms.x, scaleY: ms.y, posX: mp.x, posY: mp.y };
-  console.log(`Master: "${layerName(masterId)}" (scale ${ms.x}, ${ms.y} | pos ${mp.x}, ${mp.y})`);
+  lastMaster = { w: sz.w, h: sz.h, posX: mp.x, posY: mp.y };
+  console.log(
+    `Master: "${layerName(masterId)}" ` +
+    `(${masterSizeAttrs.wAttr}: ${sz.w}, ${masterSizeAttrs.hAttr}: ${sz.h} | ` +
+    `pos ${mp.x}, ${mp.y})`
+  );
   refreshLabels();
 }
 
@@ -86,25 +118,21 @@ function tieSelected() {
     console.log('WARNING: select layers to tie.');
     return;
   }
-  const ms = getScale(masterId);
+  const sz = getMasterSize();
   const mp = getPosition(masterId);
   let count = 0;
   for (const id of sel) {
     if (id === masterId) continue;
-    const fs = getScale(id);
     const fp = getPosition(id);
     followers[id] = {
-      ratioX: ms.x !== 0 ? fs.x / ms.x : 1,
-      ratioY: ms.y !== 0 ? fs.y / ms.y : 1,
       offsetX: fp.x - mp.x,
       offsetY: fp.y - mp.y,
-      baseMasterScaleX: ms.x,
-      baseMasterScaleY: ms.y,
+      baseMasterW: sz.w,
+      baseMasterH: sz.h,
     };
     console.log(
       `Tied "${layerName(id)}" ` +
-      `(scale ratio ${followers[id].ratioX.toFixed(3)}, ${followers[id].ratioY.toFixed(3)} | ` +
-      `offset ${followers[id].offsetX.toFixed(1)}, ${followers[id].offsetY.toFixed(1)})`
+      `(offset ${followers[id].offsetX.toFixed(1)}, ${followers[id].offsetY.toFixed(1)})`
     );
     count++;
   }
@@ -133,38 +161,37 @@ function clearAll() {
   const n = Object.keys(followers).length;
   for (const id of Object.keys(followers)) delete followers[id];
   masterId = null;
-  lastMaster = { scaleX: 1, scaleY: 1, posX: 0, posY: 0 };
+  masterSizeAttrs = null;
+  lastMaster = { w: 0, h: 0, posX: 0, posY: 0 };
   console.log(`Cleared master and ${n} tied layer(s).`);
   refreshLabels();
 }
 
 // ─── Reactive update ──────────────────────────────────────────────────────────
 // onAttrChanged fires for every attribute edit in the comp.
-// We bail early when neither scale nor position has changed on the master,
-// which prevents the follower writes from feeding back into this handler.
+// Bail early if neither size nor position has changed on the master,
+// which prevents follower position writes from feeding back into this handler.
 
 function onAttrChanged() {
-  if (!masterId || !Object.keys(followers).length) return;
+  if (!masterId || !masterSizeAttrs || !Object.keys(followers).length) return;
 
-  const ms = getScale(masterId);
+  const sz = getMasterSize();
   const mp = getPosition(masterId);
+  if (!sz) return;
 
   if (
-    ms.x === lastMaster.scaleX && ms.y === lastMaster.scaleY &&
-    mp.x === lastMaster.posX  && mp.y === lastMaster.posY
+    sz.w  === lastMaster.w    && sz.h  === lastMaster.h &&
+    mp.x  === lastMaster.posX && mp.y  === lastMaster.posY
   ) return;
 
-  lastMaster = { scaleX: ms.x, scaleY: ms.y, posX: mp.x, posY: mp.y };
+  lastMaster = { w: sz.w, h: sz.h, posX: mp.x, posY: mp.y };
 
-  for (const [id, { ratioX, ratioY, offsetX, offsetY, baseMasterScaleX, baseMasterScaleY }] of Object.entries(followers)) {
-    // How much has the master scaled since tie-time?
-    const sfx = baseMasterScaleX !== 0 ? ms.x / baseMasterScaleX : 1;
-    const sfy = baseMasterScaleY !== 0 ? ms.y / baseMasterScaleY : 1;
+  for (const [id, { offsetX, offsetY, baseMasterW, baseMasterH }] of Object.entries(followers)) {
+    // How much has the master grown since tie-time?
+    const sfx = baseMasterW !== 0 ? sz.w / baseMasterW : 1;
+    const sfy = baseMasterH !== 0 ? sz.h / baseMasterH : 1;
     try {
       api.set(id, {
-        'scale.x':    ms.x * ratioX,
-        'scale.y':    ms.y * ratioY,
-        // Stretch the tie-time offset by the same factor the master has grown
         'position.x': mp.x + offsetX * sfx,
         'position.y': mp.y + offsetY * sfy,
       });
@@ -199,7 +226,7 @@ root.add(masterLabel, tiedLabel, setMasterBtn, tieBtn, untieBtn, clearBtn);
 
 ui.addCallbackObject({ onAttrChanged });
 
-ui.setTitle('Shape Scale Tie');
-ui.setMinimumWidth(240);
+ui.setTitle('Shape Size Tie');
+ui.setMinimumWidth(260);
 ui.add(root);
 ui.show();
