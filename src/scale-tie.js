@@ -18,6 +18,10 @@
 // ─── Size attribute detection ─────────────────────────────────────────────────
 // Different shape types expose different attribute names for their dimensions.
 
+function hasAttr(layerId, attr) {
+  try { return api.hasAttribute(layerId, attr); } catch (_) { return false; }
+}
+
 function detectSizeAttrs(layerId) {
   const pairs = [
     { w: 'width',    h: 'height'   },
@@ -26,17 +30,11 @@ function detectSizeAttrs(layerId) {
     { w: 'scaleX',  h: 'scaleY'   },
   ];
   for (const { w, h } of pairs) {
-    try {
-      const wv = api.get(layerId, w);
-      const hv = api.get(layerId, h);
-      if (wv != null && hv != null) return { wAttr: w, hAttr: h };
-    } catch (_) {}
+    if (hasAttr(layerId, w) && hasAttr(layerId, h)) return { wAttr: w, hAttr: h };
   }
   // Single-axis shapes (circles, regular polygons)
   for (const attr of ['radius', 'xRadius', 'size']) {
-    try {
-      if (api.get(layerId, attr) != null) return { wAttr: attr, hAttr: attr };
-    } catch (_) {}
+    if (hasAttr(layerId, attr)) return { wAttr: attr, hAttr: attr };
   }
   return null;
 }
@@ -66,10 +64,11 @@ let lastMaster = { w: 0, h: 0, posX: 0, posY: 0 };
 //   baseMasterW/H = master size at tie-time (reference for computing change ratio)
 const followers = {};
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getMasterSize() {
   if (!masterSizeAttrs) return null;
+  if (!hasAttr(masterId, masterSizeAttrs.wAttr)) return null;
   try {
     return {
       w: api.get(masterId, masterSizeAttrs.wAttr) ?? 0,
@@ -110,6 +109,7 @@ function setMaster() {
   masterSizeAttrs = detectSizeAttrs(masterId);
   if (!masterSizeAttrs) {
     console.log(`WARNING: "${layerName(masterId)}" has no detectable width/height attributes.`);
+    console.log('Tip: select the shape and click "Log Attrs of Selected" to see available attributes.');
     masterId = null;
     return;
   }
