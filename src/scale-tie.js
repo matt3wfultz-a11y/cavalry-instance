@@ -24,10 +24,11 @@ function hasAttr(layerId, attr) {
 
 function detectSizeAttrs(layerId) {
   const pairs = [
-    { w: 'width',    h: 'height'   },
-    { w: 'size.x',  h: 'size.y'   },
-    { w: 'xRadius', h: 'yRadius'  },
-    { w: 'scaleX',  h: 'scaleY'   },
+    { w: 'generator.dimensions.x', h: 'generator.dimensions.y' },
+    { w: 'width',                  h: 'height'                  },
+    { w: 'size.x',                 h: 'size.y'                  },
+    { w: 'xRadius',                h: 'yRadius'                 },
+    { w: 'scaleX',                 h: 'scaleY'                  },
   ];
   for (const { w, h } of pairs) {
     if (hasAttr(layerId, w) && hasAttr(layerId, h)) return { wAttr: w, hAttr: h };
@@ -203,7 +204,6 @@ function onAttrChanged() {
   lastMaster = { w: sz.w, h: sz.h, posX: mp.x, posY: mp.y };
 
   for (const [id, { offsetX, offsetY, baseMasterW, baseMasterH }] of Object.entries(followers)) {
-    // How much has the master grown since tie-time?
     const sfx = baseMasterW !== 0 ? sz.w / baseMasterW : 1;
     const sfy = baseMasterH !== 0 ? sz.h / baseMasterH : 1;
     try {
